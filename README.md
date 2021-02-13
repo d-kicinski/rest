@@ -1,6 +1,6 @@
 # rest
 
-The simples api for creating web interface to your functions.
+The simplest api for creating web interface to your functions.
 * no external dependencies :heavy_check_mark:
 * no batteries included :heavy_check_mark:
 * barely works :fire: :heavy_check_mark: :fire:

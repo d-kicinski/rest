@@ -3,20 +3,10 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import sys
 from asyncio import StreamReader, StreamWriter
 from dataclasses import dataclass
-from typing import List, Dict
-
-from constatnts import HOST, PORT
-
-
-RESPONSE = "HTTP/1.1 {status} {status_msg}\r\n" \
-           "Content-Type: application / json\r\n" \
-           "Content-Encoding: UTF-8\r\n" \
-           "Accept-Ranges: bytes\r\n" \
-           "Connection: closed\r\n" \
-           "\r\n" \
-           "{json}"
+from typing import List, Dict, Callable
 
 
 @dataclass
@@ -44,21 +34,27 @@ class HTMLHeader:
     content_length: int
 
 
-def route_sum(msg: Message) -> Message:
-    return Message([sum(msg.values)])
+RouteFn = Callable[[Message], Message]
+
+ROUTES = {}
+
+RESPONSE = "HTTP/1.1 {status} {status_msg}\r\n" \
+           "Content-Type: application / json\r\n" \
+           "Content-Encoding: UTF-8\r\n" \
+           "Accept-Ranges: bytes\r\n" \
+           "Connection: closed\r\n" \
+           "\r\n" \
+           "{json}"
 
 
-def route_pow(msg: Message) -> Message:
-    return Message([pow(v, 2) for v in msg.values])
+def route(route_path: str) -> Callable[[RouteFn], RouteFn]:
+    def wrapped(fn: RouteFn) -> RouteFn:
+        ROUTES[route_path] = fn
+        return fn
+    return wrapped
 
 
-ROUTES = {
-    "/sum": route_sum,
-    "/pow": route_pow
-}
-
-
-def build_response(header: HTMLHeader, data: Message) -> bytes:
+def build_response(data: Message) -> bytes:
     response = RESPONSE.format(
         status=200,
         status_msg="OK",
@@ -85,7 +81,7 @@ async def read_html_header(reader: StreamReader) -> HTMLHeader:
             break
         header_str += header_bytes.decode()
 
-    print(header_str)
+    print(header_str, file=sys.stderr)
     return parse_header(header_str)
 
 
@@ -94,15 +90,13 @@ async def read_message(reader: StreamReader, message_length: int) -> Message:
     return Message.form_json(content_bytes.decode())
 
 
-async def handle_client(reader: StreamReader, writer: StreamWriter):
+async def handle_routes(reader: StreamReader, writer: StreamWriter):
     header: HTMLHeader = await read_html_header(reader)
     message: Message = await read_message(reader, header.content_length)
 
-    print(header)
-
     ret: Message = ROUTES[header.url](message)
 
-    response: bytes = build_response(header, ret)
+    response: bytes = build_response(ret)
 
     writer.write(response)
     await writer.drain()
@@ -111,12 +105,13 @@ async def handle_client(reader: StreamReader, writer: StreamWriter):
     await writer.wait_closed()
 
 
-async def main():
-    server = await asyncio.start_server(handle_client,
-                                        host=HOST, port=PORT, reuse_address=True, reuse_port=True,
+async def serve(host, port):
+    server = await asyncio.start_server(handle_routes,
+                                        host=host, port=port,
+                                        reuse_address=True,
+                                        reuse_port=True,
                                         start_serving=False)
     await server.serve_forever()
 
 
-if __name__ == '__main__':
-    asyncio.run(main())
+
